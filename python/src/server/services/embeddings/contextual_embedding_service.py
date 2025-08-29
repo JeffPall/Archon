@@ -75,7 +75,7 @@ Please give a short succinct context to situate this chunk within the overall do
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.3,
-                    max_tokens=200,
+                    max_completion_tokens=200,
                 )
 
                 context = response.choices[0].message.content.strip()
@@ -172,7 +172,7 @@ async def generate_contextual_embeddings_batch(
                     {"role": "user", "content": batch_prompt},
                 ],
                 temperature=0,
-                max_tokens=100 * len(chunks),  # Limit response size
+                max_completion_tokens=100 * len(chunks),  # Limit response size
             )
 
             # Parse response
