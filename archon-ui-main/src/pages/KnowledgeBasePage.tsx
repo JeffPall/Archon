@@ -1217,7 +1217,7 @@ const AddKnowledgeModal = ({
   const [tags, setTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
   const [knowledgeType, setKnowledgeType] = useState<'technical' | 'business'>('technical');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [crawlDepth, setCrawlDepth] = useState(2);
   const [showDepthTooltip, setShowDepthTooltip] = useState(false);
@@ -1345,42 +1345,51 @@ const AddKnowledgeModal = ({
           onSuccess();
         }
       } else {
-        if (!selectedFile) {
-          showToast('Please select a file', 'error');
+        if (selectedFiles.length === 0) {
+          showToast('Please select at least one file', 'error');
           return;
         }
+
+        showToast(`Starting upload of ${selectedFiles.length} files...`, 'info');
+        onClose(); // Close modal immediately
         
-        const result = await knowledgeBaseService.uploadDocument(selectedFile, {
-          knowledge_type: knowledgeType,
-          tags
-        });
-        
-        if (result.success && result.progressId) {
-          // Upload started with progressId
-          
-          // Start progress tracking for upload
-          onStartCrawl(result.progressId, {
-            currentUrl: `file://${selectedFile.name}`,
-            percentage: 0,
-            status: 'starting',
-            logs: [`Starting upload of ${selectedFile.name}`],
-            uploadType: 'document',
-            fileName: selectedFile.name,
-            fileType: selectedFile.type
-          });
-          
-          // onStartCrawl called successfully for upload
-          
-          showToast('Document upload started - tracking progress', 'success');
-          onClose(); // Close modal immediately
-        } else {
-          // No progressId in upload result
-          // Upload result structure logged
-          
-          // Fallback for non-streaming response
-          showToast((result as any).message || 'Document uploaded successfully', 'success');
-          onSuccess();
+        let allUploadsSuccessful = true;
+        for (const file of selectedFiles) {
+          try {
+            const result = await knowledgeBaseService.uploadDocument(file, {
+              knowledge_type: knowledgeType,
+              tags
+            });
+
+            if (result.success && result.progressId) {
+              // Start progress tracking for each upload
+              onStartCrawl(result.progressId, {
+                currentUrl: `file://${file.name}`,
+                percentage: 0,
+                status: 'starting',
+                logs: [`Starting upload of ${file.name}`],
+                uploadType: 'document',
+                fileName: file.name,
+                fileType: file.type
+              });
+            } else {
+              // Fallback for non-streaming response, though less likely with current backend
+              showToast((result as any).message || `Document ${file.name} uploaded successfully`, 'success');
+            }
+          } catch (uploadError) {
+            allUploadsSuccessful = false;
+            console.error(`Failed to upload ${file.name}:`, uploadError);
+            showToast(`Failed to upload ${file.name}`, 'error');
+            // Continue to next file
+          }
         }
+
+        if (allUploadsSuccessful) {
+          showToast('All files uploaded successfully!', 'success');
+        } else {
+          showToast('Some files failed to upload.', 'warning');
+        }
+        onSuccess();
       }
     } catch (error) {
       console.error('Failed to add knowledge:', error);
@@ -1450,14 +1459,15 @@ const AddKnowledgeModal = ({
         {method === 'file' && (
           <div className="mb-6">
             <label className="block text-gray-600 dark:text-zinc-400 text-sm mb-2">
-              Upload Document
+              Upload Documents
             </label>
             <div className="relative">
               <input 
                 id="file-upload"
                 type="file"
                 accept=".pdf,.md,.doc,.docx,.txt"
-                onChange={e => setSelectedFile(e.target.files?.[0] || null)}
+                multiple
+                onChange={e => setSelectedFiles(Array.from(e.target.files || []))}
                 className="sr-only"
               />
               <label 
@@ -1472,16 +1482,18 @@ const AddKnowledgeModal = ({
                 <Upload className="w-6 h-6" />
                 <div className="text-center">
                   <div className="font-medium">
-                    {selectedFile ? selectedFile.name : 'Choose File'}
+                    {selectedFiles.length > 0 ? `${selectedFiles.length} file(s) selected` : 'Choose Files'}
                   </div>
                   <div className="text-sm opacity-75 mt-1">
-                    {selectedFile ? `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB` : 'Click to browse or drag and drop'}
+                    {selectedFiles.length > 0
+                      ? `${(selectedFiles.reduce((acc, file) => acc + file.size, 0) / 1024 / 1024).toFixed(2)} MB total`
+                      : 'Click to browse or drag and drop'}
                   </div>
                 </div>
               </label>
             </div>
             <p className="text-gray-500 dark:text-zinc-600 text-sm mt-2">
-              Supports PDF, MD, DOC up to 10MB
+              Supports PDF, MD, DOC up to 10MB each.
             </p>
           </div>
         )}
