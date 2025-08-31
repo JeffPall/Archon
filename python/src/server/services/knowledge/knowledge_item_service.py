@@ -3,7 +3,7 @@ Knowledge Item Service
 
 Handles all knowledge item CRUD operations and data transformations.
 """
-
+import asyncio
 from typing import Any
 
 from ...config.logfire_config import safe_logfire_error, safe_logfire_info
@@ -113,26 +113,29 @@ class KnowledgeItemService:
                     if item["source_id"] not in first_urls:
                         first_urls[item["source_id"]] = item["url"]
 
-                # Get code example counts per source - NO CONTENT, just counts!
-                # Fetch counts individually for each source
-                for source_id in source_ids:
-                    count_result = (
-                        self.supabase.from_("archon_code_examples")
-                        .select("id", count="exact", head=True)
-                        .eq("source_id", source_id)
-                        .execute()
-                    )
-                    code_example_counts[source_id] = (
-                        count_result.count if hasattr(count_result, "count") else 0
-                    )
+                # Concurrently fetch code example and chunk counts
+                async def get_counts(source_id):
+                    try:
+                        # Use asyncio.gather to run both count queries for a single source_id concurrently
+                        count_results = await asyncio.gather(
+                            self.supabase.from_("archon_code_examples").select("id", count="exact", head=True).eq("source_id", source_id).execute(),
+                            self.supabase.from_("archon_crawled_pages").select("id", count="exact", head=True).eq("source_id", source_id).execute()
+                        )
+                        code_count_res, chunk_count_res = count_results
+                        return source_id, (code_count_res.count or 0), (chunk_count_res.count or 0)
+                    except Exception as e:
+                        safe_logfire_error(f"Failed to get counts for source_id {source_id}: {e}")
+                        return source_id, 0, 0
 
-                # Ensure all sources have a count (default to 0)
-                for source_id in source_ids:
-                    if source_id not in code_example_counts:
-                        code_example_counts[source_id] = 0
-                    chunk_counts[source_id] = 0  # Default to 0 to avoid timeout
+                tasks = [get_counts(sid) for sid in source_ids]
+                results = await asyncio.gather(*tasks)
+
+                for source_id, code_count, chunk_count in results:
+                    code_example_counts[source_id] = code_count
+                    chunk_counts[source_id] = chunk_count
 
                 safe_logfire_info(f"Code example counts: {code_example_counts}")
+                safe_logfire_info(f"Chunk counts: {chunk_counts}")
 
             # Transform sources to items with batched data
             items = []

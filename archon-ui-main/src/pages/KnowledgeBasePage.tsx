@@ -62,6 +62,9 @@ export const KnowledgeBasePage = () => {
   const [loading, setLoading] = useState(true);
   const [totalItems, setTotalItems] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
+  const perPage = 20; // Items per page
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(searchQuery);
 
   // Selection state
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -80,24 +83,27 @@ export const KnowledgeBasePage = () => {
 
   const { showToast } = useToast();
 
-  // Single consolidated loading function - only loads data, no filtering
+  // Single consolidated loading function
   const loadKnowledgeItems = async () => {
     const startTime = Date.now();
-    console.log('📊 Loading all knowledge items from API...');
+    console.log(`📊 Loading knowledge items from API for page ${currentPage}...`);
 
     try {
       setLoading(true);
-      // Always load ALL items from API, filtering happens client-side
-      const response = await knowledgeBaseService.getKnowledgeItems({
+      const filters = {
         page: currentPage,
-        per_page: 1000 // Load more items per page since we filter client-side
-      });
+        per_page: perPage,
+        search: debouncedSearchQuery,
+        knowledge_type: typeFilter === 'all' ? undefined : typeFilter,
+      };
+      const response = await knowledgeBaseService.getKnowledgeItems(filters);
 
       const loadTime = Date.now() - startTime;
       console.log(`📊 API request completed in ${loadTime}ms, loaded ${response.items.length} items`);
 
       setKnowledgeItems(response.items);
       setTotalItems(response.total);
+      setTotalPages(response.pages || Math.ceil(response.total / perPage));
     } catch (error) {
       console.error('Failed to load knowledge items:', error);
       showToast('Failed to load knowledge items', 'error');
@@ -107,19 +113,20 @@ export const KnowledgeBasePage = () => {
     }
   };
 
-  // Initialize knowledge items on mount - load via REST API immediately
+  // Debounce search query
   useEffect(() => {
-    console.log('🚀 KnowledgeBasePage: Loading knowledge items via REST API');
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+      setCurrentPage(1); // Reset to first page on new search
+    }, 300); // 300ms debounce
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
 
-    // Load items immediately via REST API
+  // Load knowledge items when filters change
+  useEffect(() => {
     loadKnowledgeItems();
+  }, [currentPage, debouncedSearchQuery, typeFilter]);
 
-    return () => {
-      console.log('🧹 KnowledgeBasePage: Cleaning up');
-      // Cleanup all crawl progress connections on unmount
-      crawlProgressService.disconnect();
-    };
-  }, []); // Only run once on mount
 
   // Load and reconnect to active crawls from localStorage
   useEffect(() => {
@@ -232,34 +239,21 @@ export const KnowledgeBasePage = () => {
         console.error('Failed to load active crawls:', error);
       }
     };
-
     loadActiveCrawls();
+
+    return () => {
+      console.log('🧹 KnowledgeBasePage: Cleaning up');
+      // Cleanup all crawl progress connections on unmount
+      crawlProgressService.disconnect();
+    };
   }, []); // Only run once on mount
 
-
-  // Memoized filtered items - filters run client-side
-  const filteredItems = useMemo(() => {
-    return knowledgeItems.filter(item => {
-      // Type filter
-      const typeMatch = typeFilter === 'all' || item.metadata.knowledge_type === typeFilter;
-
-      // Search filter - search in title, description, tags, and source_id
-      const searchLower = searchQuery.toLowerCase();
-      const searchMatch = !searchQuery ||
-        item.title.toLowerCase().includes(searchLower) ||
-        item.metadata.description?.toLowerCase().includes(searchLower) ||
-        item.metadata.tags?.some(tag => tag.toLowerCase().includes(searchLower)) ||
-        item.source_id.toLowerCase().includes(searchLower);
-
-      return typeMatch && searchMatch;
-    });
-  }, [knowledgeItems, typeFilter, searchQuery]);
 
   // Memoized grouped items
   const groupedItems = useMemo(() => {
     if (viewMode !== 'grid') return [];
 
-    return filteredItems
+    return knowledgeItems
       .filter(item => item.metadata?.group_name)
       .reduce((groups: GroupedKnowledgeItem[], item) => {
         const groupName = item.metadata.group_name!;
@@ -286,12 +280,12 @@ export const KnowledgeBasePage = () => {
 
         return groups;
       }, []);
-  }, [filteredItems, viewMode]);
+  }, [knowledgeItems, viewMode]);
 
   // Memoized ungrouped items
   const ungroupedItems = useMemo(() => {
-    return viewMode === 'grid' ? filteredItems.filter(item => !item.metadata?.group_name) : [];
-  }, [filteredItems, viewMode]);
+    return viewMode === 'grid' ? knowledgeItems.filter(item => !item.metadata?.group_name) : [];
+  }, [knowledgeItems, viewMode]);
 
   // Use our custom staggered entrance hook for the page header
   const {
@@ -304,7 +298,7 @@ export const KnowledgeBasePage = () => {
   const {
     containerVariants: contentContainerVariants,
     itemVariants: contentItemVariants
-  } = useStaggeredEntrance(filteredItems, 0.15);
+  } = useStaggeredEntrance(knowledgeItems, 0.15);
 
   const handleAddKnowledge = () => {
     setIsAddModalOpen(true);
@@ -330,8 +324,8 @@ export const KnowledgeBasePage = () => {
 
       // Get items in range
       for (let i = start; i <= end; i++) {
-        if (filteredItems[i]) {
-          newSelected.add(filteredItems[i].id);
+        if (knowledgeItems[i]) {
+          newSelected.add(knowledgeItems[i].id);
         }
       }
     } else if (event.ctrlKey || event.metaKey) {
@@ -355,7 +349,7 @@ export const KnowledgeBasePage = () => {
   };
 
   const selectAll = () => {
-    const allIds = new Set(filteredItems.map(item => item.id));
+    const allIds = new Set(knowledgeItems.map(item => item.id));
     setSelectedItems(allIds);
   };
 
@@ -411,7 +405,7 @@ export const KnowledgeBasePage = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSelectionMode, filteredItems]);
+  }, [isSelectionMode, knowledgeItems]);
 
   const handleRefreshItem = async (sourceId: string) => {
     try {
@@ -1006,7 +1000,7 @@ export const KnowledgeBasePage = () => {
         viewMode === 'grid' ? <KnowledgeGridSkeleton /> : <KnowledgeTableSkeleton />
       ) : viewMode === 'table' ? (
         <KnowledgeTable
-          items={filteredItems}
+          items={knowledgeItems}
           onDelete={handleDeleteItem}
         />
       ) : (
@@ -1155,7 +1149,7 @@ export const KnowledgeBasePage = () => {
                     </>
                   ) : (
                     // List view - use individual items
-                    filteredItems.length > 0 ? filteredItems.map((item, index) => (
+                    knowledgeItems.length > 0 ? knowledgeItems.map((item, index) => (
                       <motion.div key={item.id} variants={contentItemVariants}>
                         <KnowledgeItemCard
                           item={item}
@@ -1180,6 +1174,28 @@ export const KnowledgeBasePage = () => {
         </>
       )}
     </div>
+    {/* Pagination Controls */}
+    {totalPages > 1 && (
+      <div className="flex justify-center items-center gap-4 mt-8">
+        <Button
+          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+          disabled={currentPage === 1 || loading}
+          variant="secondary"
+        >
+          Previous
+        </Button>
+        <span className="text-gray-600 dark:text-zinc-400">
+          Page {currentPage} of {totalPages}
+        </span>
+        <Button
+          onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+          disabled={currentPage === totalPages || loading}
+          variant="secondary"
+        >
+          Next
+        </Button>
+      </div>
+    )}
     {/* Add Knowledge Modal */}
     {isAddModalOpen && <AddKnowledgeModal
       onClose={() => setIsAddModalOpen(false)}
