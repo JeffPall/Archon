@@ -129,7 +129,7 @@ async def get_knowledge_sources():
 
 @router.get("/knowledge-items")
 async def get_knowledge_items(
-    page: int = 1, per_page: int = 20, knowledge_type: str | None = None, search: str | None = None
+    page: int = 1, per_page: int = 1000, knowledge_type: str | None = None, search: str | None = None
 ):
     """Get knowledge items with pagination and filtering."""
     try:
