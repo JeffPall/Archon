@@ -15,6 +15,12 @@ from .client_manager import get_supabase_client
 
 logger = get_logger(__name__)
 
+# Define the columns to be selected from the archon_sources table
+# to avoid using select("*")
+_SOURCES_SUMMARY_COLUMNS = "source_id,title,summary,created_at,updated_at"
+_SOURCES_DETAILS_COLUMNS = "source_id,source_url,source_display_name,summary,total_word_count,title,metadata,created_at,updated_at"
+_SOURCES_BY_TYPE_COLUMNS = "source_id,title,summary,metadata,total_word_count,created_at,updated_at"
+
 
 def _get_model_choice() -> str:
     """Get MODEL_CHOICE with direct fallback."""
@@ -205,7 +211,7 @@ def generate_source_title_and_metadata(
 
             # Limit content for prompt
             sample_content = content[:3000] if len(content) > 3000 else content
-            
+
             # Use display name if available for better context
             source_context = source_display_name if source_display_name else source_id
 
@@ -238,8 +244,8 @@ Provide only the title, nothing else."""
     # Build metadata - source_type will be determined by caller based on actual URL
     # Default to "url" but this should be overridden by the caller
     metadata = {
-        "knowledge_type": knowledge_type, 
-        "tags": tags or [], 
+        "knowledge_type": knowledge_type,
+        "tags": tags or [],
         "source_type": "url",  # Default, should be overridden by caller based on actual URL
         "auto_generated": True
     }
@@ -293,7 +299,7 @@ def update_source_info(
                 source_type = "file"
             else:
                 source_type = "url"
-            
+
             metadata = {
                 "knowledge_type": knowledge_type,
                 "tags": tags or [],
@@ -312,13 +318,13 @@ def update_source_info(
                 "metadata": metadata,
                 "updated_at": "now()",
             }
-            
+
             # Add new fields if provided
             if source_url:
                 update_data["source_url"] = source_url
             if source_display_name:
                 update_data["source_display_name"] = source_display_name
-            
+
             result = (
                 client.table("archon_sources")
                 .update(update_data)
@@ -334,7 +340,7 @@ def update_source_info(
             if source_display_name:
                 # Use the display name directly as the title (truncated to prevent DB issues)
                 title = source_display_name[:100].strip()
-                
+
                 # Determine source_type based on source_url or original_url
                 if source_url and source_url.startswith("file://"):
                     source_type = "file"
@@ -342,7 +348,7 @@ def update_source_info(
                     source_type = "file"
                 else:
                     source_type = "url"
-                
+
                 metadata = {
                     "knowledge_type": knowledge_type,
                     "tags": tags or [],
@@ -354,7 +360,7 @@ def update_source_info(
                 title, metadata = generate_source_title_and_metadata(
                     source_id, content, knowledge_type, tags, None, source_display_name
                 )
-                
+
                 # Override the source_type from AI with actual URL-based determination
                 if source_url and source_url.startswith("file://"):
                     metadata["source_type"] = "file"
@@ -377,13 +383,13 @@ def update_source_info(
                 "total_word_count": word_count,
                 "metadata": metadata,
             }
-            
+
             # Add new fields if provided
             if source_url:
                 upsert_data["source_url"] = source_url
             if source_display_name:
                 upsert_data["source_display_name"] = source_display_name
-            
+
             client.table("archon_sources").upsert(upsert_data).execute()
             search_logger.info(f"Created/updated source {source_id} with title: {title}")
 
@@ -409,7 +415,7 @@ class SourceManagementService:
             Tuple of (success, result_dict)
         """
         try:
-            response = self.supabase_client.table("archon_sources").select("*").execute()
+            response = self.supabase_client.table("archon_sources").select(_SOURCES_SUMMARY_COLUMNS).execute()
 
             sources = []
             for row in response.data:
@@ -636,7 +642,7 @@ class SourceManagementService:
             # Get source metadata
             source_response = (
                 self.supabase_client.table("archon_sources")
-                .select("*")
+                .select(_SOURCES_DETAILS_COLUMNS)
                 .eq("source_id", source_id)
                 .execute()
             )
@@ -685,7 +691,7 @@ class SourceManagementService:
             Tuple of (success, result_dict)
         """
         try:
-            query = self.supabase_client.table("archon_sources").select("*")
+            query = self.supabase_client.table("archon_sources").select(_SOURCES_BY_TYPE_COLUMNS)
 
             if knowledge_type:
                 # Filter by metadata->knowledge_type

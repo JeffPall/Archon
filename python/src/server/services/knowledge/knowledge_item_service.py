@@ -8,6 +8,10 @@ from typing import Any
 
 from ...config.logfire_config import safe_logfire_error, safe_logfire_info
 
+# Define the columns to be selected from the archon_sources table
+# to avoid using select("*")
+_ARCHON_SOURCES_COLUMNS = "source_id,summary,total_word_count,title,metadata,created_at,updated_at"
+
 
 class KnowledgeItemService:
     """
@@ -44,7 +48,7 @@ class KnowledgeItemService:
         """
         try:
             # Build the query with filters at database level for better performance
-            query = self.supabase.from_("archon_sources").select("*")
+            query = self.supabase.from_("archon_sources").select(_ARCHON_SOURCES_COLUMNS)
 
             # Apply knowledge type filter at database level if provided
             if knowledge_type:
@@ -60,7 +64,7 @@ class KnowledgeItemService:
             # Get total count before pagination
             # Clone the query for counting
             count_query = self.supabase.from_("archon_sources").select(
-                "*", count="exact", head=True
+                "source_id,metadata,title,summary", count="exact", head=True
             )
 
             # Apply same filters to count query
@@ -208,7 +212,7 @@ class KnowledgeItemService:
             # Get the source record
             result = (
                 self.supabase.from_("archon_sources")
-                .select("*")
+                .select(_ARCHON_SOURCES_COLUMNS)
                 .eq("source_id", source_id)
                 .single()
                 .execute()
@@ -312,7 +316,7 @@ class KnowledgeItemService:
         """
         try:
             # Query the sources table
-            result = self.supabase.from_("archon_sources").select("*").order("source_id").execute()
+            result = self.supabase.from_("archon_sources").select(_ARCHON_SOURCES_COLUMNS).order("source_id").execute()
 
             # Format the sources
             sources = []
